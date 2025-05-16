@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from "react";
 import "./App.css";
 
+// Utility to check if placing num at grid[row][col] is valid
 const isSafe = (grid, row, col, num) => {
-  if (grid[row][col] !== 0) return false;
   for (let i = 0; i < 9; i++) {
     if (grid[row][i] === num || grid[i][col] === num) return false;
     const boxRow = 3 * Math.floor(row / 3) + Math.floor(i / 3);
@@ -12,59 +12,109 @@ const isSafe = (grid, row, col, num) => {
   return true;
 };
 
+// Solve Sudoku with backtracking
 const solveSudoku = (grid) => {
-  const isValid = (row, col, num) => {
-    for (let i = 0; i < 9; i++) {
-      if (grid[row][i] === num || grid[i][col] === num) return false;
-      const boxRow = 3 * Math.floor(row / 3) + Math.floor(i / 3);
-      const boxCol = 3 * Math.floor(col / 3) + i % 3;
-      if (grid[boxRow][boxCol] === num) return false;
-    }
-    return true;
-  };
-
-  const solve = () => {
-    for (let row = 0; row < 9; row++) {
-      for (let col = 0; col < 9; col++) {
-        if (grid[row][col] === 0) {
-          for (let num = 1; num <= 9; num++) {
-            if (isValid(row, col, num)) {
-              grid[row][col] = num;
-              if (solve()) return true;
-              grid[row][col] = 0;
-            }
+  for (let row = 0; row < 9; row++) {
+    for (let col = 0; col < 9; col++) {
+      if (grid[row][col] === 0) {
+        for (let num = 1; num <= 9; num++) {
+          if (isSafe(grid, row, col, num)) {
+            grid[row][col] = num;
+            if (solveSudoku(grid)) return true;
+            grid[row][col] = 0;
           }
-          return false;
         }
+        return false;
+      }
+    }
+  }
+  return true;
+};
+
+// Generate a fully solved sudoku grid
+const generateFullGrid = () => {
+  const grid = Array(9).fill(0).map(() => Array(9).fill(0));
+  const fillGrid = () => {
+    for (let i = 0; i < 81; i++) {
+      const row = Math.floor(i / 9);
+      const col = i % 9;
+      if (grid[row][col] === 0) {
+        let numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+        // Shuffle numbers array
+        numbers.sort(() => Math.random() - 0.5);
+        for (let num of numbers) {
+          if (isSafe(grid, row, col, num)) {
+            grid[row][col] = num;
+            if (fillGrid()) return true;
+            grid[row][col] = 0;
+          }
+        }
+        return false;
       }
     }
     return true;
   };
-
-  return solve() ? grid : null;
+  fillGrid();
+  return grid;
 };
 
+// Remove cells to create puzzle based on difficulty
 const generateSudoku = (difficulty = "easy") => {
-  const puzzle = Array(9).fill(0).map(() => Array(9).fill(0));
   let attempts;
-  if (difficulty === "easy") attempts = 30;
-  else if (difficulty === "medium") attempts = 20;
-  else attempts = 10;
+  if (difficulty === "easy") attempts = 40;
+  else if (difficulty === "medium") attempts = 50;
+  else attempts = 60; // hard
+
+  const fullGrid = generateFullGrid();
+
+  // Deep copy grid for puzzle
+  const puzzle = fullGrid.map(row => row.slice());
+
   while (attempts > 0) {
     const row = Math.floor(Math.random() * 9);
     const col = Math.floor(Math.random() * 9);
-    const num = Math.floor(Math.random() * 9) + 1;
-    if (isSafe(puzzle, row, col, num)) {
-      puzzle[row][col] = num;
-      attempts--;
+
+    if (puzzle[row][col] !== 0) {
+      // Backup cell value
+      const backup = puzzle[row][col];
+      puzzle[row][col] = 0;
+
+      // Check if puzzle still solvable with one unique solution
+      const copyGrid = puzzle.map(r => r.slice());
+      if (!solveSudoku(copyGrid)) {
+        // Revert if no solution
+        puzzle[row][col] = backup;
+        attempts--;
+      } else {
+        attempts--;
+      }
     }
   }
+
   const fixedCells = puzzle.map(row => row.map(val => val !== 0));
   return { puzzle, fixedCells };
 };
 
+// Check if current grid is solved and valid (no conflicts, no zeros)
+const isSolved = (grid) => {
+  for (let row = 0; row < 9; row++) {
+    for (let col = 0; col < 9; col++) {
+      const val = grid[row][col];
+      if (val === 0) return false;
+      // Temporarily clear cell to check validity
+      grid[row][col] = 0;
+      if (!isSafe(grid, row, col, val)) {
+        grid[row][col] = val; // revert
+        return false;
+      }
+      grid[row][col] = val; // revert
+    }
+  }
+  return true;
+};
+
 function App() {
-  const initial = generateSudoku();
+  const initial = generateSudoku("easy");
   const [grid, setGrid] = useState(initial.puzzle);
   const [fixedCells, setFixedCells] = useState(initial.fixedCells);
   const [conflictCells, setConflictCells] = useState(new Set());
@@ -78,9 +128,13 @@ function App() {
   const [dialogMessage, setDialogMessage] = useState("");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
 
-  const showDialog = (message) => {
+  // Show dialog with optional auto-close timeout
+  const showDialog = (message, autoClose = false) => {
     setDialogMessage(message);
     setIsDialogOpen(true);
+    if (autoClose) {
+      setTimeout(() => setIsDialogOpen(false), 3000);
+    }
   };
 
   const closeDialog = () => {
@@ -101,11 +155,18 @@ function App() {
     };
   }, [isRunning]);
 
+  // When difficulty changes, reset puzzle and timer
   useEffect(() => {
+    const newPuzzle = generateSudoku(difficulty);
+    setGrid(newPuzzle.puzzle);
+    setFixedCells(newPuzzle.fixedCells);
+    setHintsLeft(3);
+    setConflictCells(new Set());
     setTime(0);
     setIsRunning(false);
-  }, [grid, difficulty]);
+  }, [difficulty]);
 
+  // Validate input and check conflicts
   const handleChange = (e, row, col) => {
     if (fixedCells[row][col]) return;
 
@@ -116,6 +177,7 @@ function App() {
       newGrid[row][col] = val === "" ? 0 : parseInt(val);
       setGrid(newGrid);
 
+      // Conflict detection
       const conflicts = new Set();
       const num = parseInt(val);
       if (!num) {
@@ -123,6 +185,7 @@ function App() {
         return;
       }
 
+      // Row conflicts
       for (let c = 0; c < 9; c++) {
         if (c !== col && newGrid[row][c] === num) {
           conflicts.add(`${row}-${c}`);
@@ -130,6 +193,7 @@ function App() {
         }
       }
 
+      // Column conflicts
       for (let r = 0; r < 9; r++) {
         if (r !== row && newGrid[r][col] === num) {
           conflicts.add(`${r}-${col}`);
@@ -137,6 +201,7 @@ function App() {
         }
       }
 
+      // Box conflicts
       const boxRowStart = 3 * Math.floor(row / 3);
       const boxColStart = 3 * Math.floor(col / 3);
       for (let r = boxRowStart; r < boxRowStart + 3; r++) {
@@ -149,6 +214,12 @@ function App() {
       }
 
       setConflictCells(conflicts);
+
+      // Check if solved on every valid input
+      if (conflicts.size === 0 && isSolved(newGrid)) {
+        showDialog("🎉 Congratulations! You solved the Sudoku!", true);
+        setIsRunning(false);
+      }
     }
   };
 
@@ -158,6 +229,8 @@ function App() {
     setFixedCells(newPuzzle.fixedCells);
     setHintsLeft(3);
     setConflictCells(new Set());
+    setTime(0);
+    setIsRunning(false);
   };
 
   const loadBlankPuzzle = () => {
@@ -167,14 +240,16 @@ function App() {
     setFixedCells(blankFixed);
     setHintsLeft(3);
     setConflictCells(new Set());
+    setTime(0);
+    setIsRunning(false);
   };
 
   const solveCurrentPuzzle = () => {
     const copyGrid = grid.map(r => r.slice());
-    const solved = solveSudoku(copyGrid);
-    if (solved) {
-      setGrid(solved);
+    if (solveSudoku(copyGrid)) {
+      setGrid(copyGrid);
       setConflictCells(new Set());
+      setIsRunning(false);
     } else {
       showDialog("No solution found!");
     }
@@ -186,8 +261,7 @@ function App() {
       return;
     }
     const copyGrid = grid.map(r => r.slice());
-    const solved = solveSudoku(copyGrid);
-    if (!solved) {
+    if (!solveSudoku(copyGrid)) {
       showDialog("No solution found to provide hints!");
       return;
     }
@@ -195,7 +269,7 @@ function App() {
       for (let col = 0; col < 9; col++) {
         if (grid[row][col] === 0) {
           const newGrid = grid.map(r => r.slice());
-          newGrid[row][col] = solved[row][col];
+          newGrid[row][col] = copyGrid[row][col];
           setGrid(newGrid);
           setHintsLeft(hintsLeft - 1);
           return;
@@ -220,14 +294,7 @@ function App() {
         <select
           id="difficulty-select"
           value={difficulty}
-          onChange={e => {
-            setDifficulty(e.target.value);
-            const newPuzzle = generateSudoku(e.target.value);
-            setGrid(newPuzzle.puzzle);
-            setFixedCells(newPuzzle.fixedCells);
-            setHintsLeft(3);
-            setConflictCells(new Set());
-          }}
+          onChange={e => setDifficulty(e.target.value)}
         >
           <option value="easy">Easy</option>
           <option value="medium">Medium</option>
@@ -285,7 +352,9 @@ function App() {
         <div className="dialog-overlay">
           <div className="dialog-box">
             <p>{dialogMessage}</p>
-            <button onClick={closeDialog}>OK</button>
+            {!dialogMessage.includes("Congratulations") && (
+              <button onClick={closeDialog}>OK</button>
+            )}
           </div>
         </div>
       )}
